@@ -1,63 +1,71 @@
 from fastapi import FastAPI
 import requests
-import cdata.powerbixmla as mod
 import adal
 import pandas as pd
 import json
 from pypowerbi.dataset import Column, Table, Dataset, Row
 from pypowerbi.client import PowerBIClient
 from pydantic import BaseModel
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import create_engine
+from credential import username, password, client_id, client_secret
+from constant import resource_url, authority_url, api_Power_BI_url, Gen_header
 
 app = FastAPI()
 
 
-class Item(BaseModel):
+class QueryModel(BaseModel):
     query: str
-
+class DatasetModel(BaseModel):
+    datasetName: str
+    tableName: str
+    colCount: int
+    colListName: list
 
 @app.get("/powerbi/workspaces")
 async def get_all_workspace():
-    authority_url = 'https://login.windows.net/common'
-    resource_url = 'https://analysis.windows.net/powerbi/api'
-    api_url = 'https://api.powerbi.com'
-
-    # change these to your credentials
-    client_id = 'ced5a0b0-3886-452b-9ca7-1fc9993a4ef5'
-    username = 'anhbt@vpi.pvn.vn'
-    password = 'Mac0901'
 
     # Authenticate using adal
     context = adal.AuthenticationContext(authority=authority_url,
-                                         validate_authority=True,
-                                         api_version=None)
+                                             validate_authority=True,
+                                             api_version=None)
+
 
     # get your authentication token
+    # Uncomment this following line if you choose login authenticate
     token = context.acquire_token_with_username_password(resource=resource_url,
-                                                         client_id=client_id,
-                                                         username=username,
-                                                         password=password)
-
-    # create your powerbi api client
-    client = PowerBIClient.get_client_with_username_password(client_id=client_id, username=username, password=password)
-
-    # get all wsp!
-    data = client.groups.get_groups()
-
-    return data
+                                                             client_id=client_id,
+                                                             username=username,
+                                                             password=password)
 
 
-@app.get("/powerbi/dataset")
-async def get_dataset(workspaceId=None, datasetId=None):
-    authority_url = 'https://login.windows.net/common'
-    resource_url = 'https://analysis.windows.net/powerbi/api'
-    api_url = 'https://api.powerbi.com'
 
-    # change these to your credentials
-    client_id = 'ced5a0b0-3886-452b-9ca7-1fc9993a4ef5'
-    username = 'anhbt@vpi.pvn.vn'
-    password = 'Mac0901'
+    # Uncomment this following line if you choose client credentials
+    # token = context.acquire_token_with_client_credentials(resource=resource_url,
+    #                                                       client_id=client_id,
+    #                                                       client_secret=client_secret)
+
+    # Gen part of API
+    headers = Gen_header(token.get("accessToken"))
+    url = api_Power_BI_url.get("workspaces")
+
+
+    # Call to REST API Power BI endpoint
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()  # raises an HTTPError if the status code indicates an error
+    except requests.exceptions.HTTPError as http_err:
+        print(f"HTTP error occurred: {http_err}")
+        return "Error"
+    except Exception as err:
+        print(f"Other error occurred: {err}")
+        return "Other Error"
+    else:
+        data = response.json()
+        print(f"Data retrieved successfully. The data is: {data}")
+        return data
+
+
+@app.get("/powerbi/datasets")
+async def get_datasets(workspaceId=None):
 
     # Authenticate using adal
     context = adal.AuthenticationContext(authority=authority_url,
@@ -74,24 +82,13 @@ async def get_dataset(workspaceId=None, datasetId=None):
     client = PowerBIClient.get_client_with_username_password(client_id=client_id, username=username, password=password)
 
     # get all your dataset!
-    if workspaceId is None:
-        data = client.datasets.get_dataset(dataset_id=datasetId)
-    else:
-        data = client.datasets.get_datasets(group_id=workspaceId)
+    data = client.datasets.get_datasets(group_id=workspaceId)
 
     return data
 
 
-@app.post("/powerbi/table")
-async def query_dax(datasetId: str, item: Item):
-    authority_url = 'https://login.windows.net/common'
-    resource_url = 'https://analysis.windows.net/powerbi/api'
-    api_url = 'https://api.powerbi.com'
-
-    # change these to your credentials
-    client_id = 'ced5a0b0-3886-452b-9ca7-1fc9993a4ef5'
-    username = 'anhbt@vpi.pvn.vn'
-    password = 'Mac0901'
+@app.post("/powerbi/queryDax")
+async def query_dax(datasetId: str, body: QueryModel):
 
     # Authenticate using adal
     context = adal.AuthenticationContext(authority=authority_url,
@@ -104,120 +101,60 @@ async def query_dax(datasetId: str, item: Item):
                                                          username=username,
                                                          password=password)
 
-    headers = {
-        'Authorization': f'Bearer {token.get("accessToken")}',
-        'Content-Type': 'application/json'
-    }
-
+    # Gen part of API
+    headers = Gen_header(token.get("accessToken"))
     url = f"https://api.powerbi.com/v1.0/myorg/datasets/{datasetId}/executeQueries"
     data = {
         "queries": [
-            {
-                "query": f"{item.query}"
-            }
+            {"query": f'{body.query}'}
         ]
     }
-    response = requests.post(url, headers=headers, json=data)
 
-    if response.status_code == 200:
-        # Print the tables in the report
-        print(response.json())
+    # Call to REST API Power BI endpoint
+    try:
+        response = requests.post(url, headers=headers, json=data)
+        response.raise_for_status()  # raises an HTTPError if the status code indicates an error
+    except requests.exceptions.HTTPError as http_err:
+        print(f"HTTP error occurred: {http_err}")
+        return "Error"
+    except Exception as err:
+        print(f"Other error occurred: {err}")
+        return "Other Error"
     else:
-        # Print the error message
-        print("Error: " + response.text)
-
-    return response.json()
+        data = response.json()
+        print(f"Data retrieved successfully. The data is: {data}")
+        return data
 
 
 @app.post("/powerbi/addnew")
-async def add_new(workspaceId=None):
-    authority_url = 'https://login.windows.net/common'
-    resource_url = 'https://analysis.windows.net/powerbi/api'
-    api_url = 'https://api.powerbi.com'
-
-    # change these to your credentials
-    client_id = 'ced5a0b0-3886-452b-9ca7-1fc9993a4ef5'
-    username = 'anhbt@vpi.pvn.vn'
-    password = 'Mac0901'
+async def add_new(workspaceId: str, body:DatasetModel):
 
     # Authenticate using adal
     context = adal.AuthenticationContext(authority=authority_url,
                                          validate_authority=True,
                                          api_version=None)
 
-    # get your authentication token
-    token = context.acquire_token_with_username_password(resource=resource_url,
-                                                         client_id=client_id,
-                                                         username=username,
-                                                         password=password)
 
     # create your powerbi api client
     client = PowerBIClient.get_client_with_username_password(client_id=client_id, username=username, password=password)
 
     # create your columns
+
     columns = []
-    columns.append(Column(name='a', data_type='Int64'))
-    columns.append(Column(name='b', data_type='Int64'))
-    columns.append(Column(name='c', data_type='Int64'))
-    columns.append(Column(name='d', data_type='Int64'))
-    columns.append(Column(name='e', data_type='string'))
-    columns.append(Column(name='f', data_type='string'))
-    rows = []
-    rows.append(Row(a=1, b=2, c=4, d=4, e='abc', f='abc'))
-    rows.append(Row(a=1, b=2, c=4, d=4, e='abc', f='abc'))
+    for item in body.colListName:
+        print(item)
+        columns.append(Column(name=item.get("name"), data_type=item.get("type")))
+
     # create your tables
-    tables = Table(name='2222', columns=columns)
-    # tables.append(Table(name='contacts', columns=columns, rows=rows))
-    # tables = Table(name='2222', columns=columns, rows=rows)
+    tables = []
+    tables.append(Table(name=body.tableName, columns=columns))
+
     # create your dataset
-    dataset = Dataset(name='apidemo3', tables=tables)
-    # abc = client.datasets.put_table(dataset_id='3cc7a461-dd86-4382-bfa8-f395e562007d', table_name='2222', table=tables)
-    abc = client.datasets.delete_dataset(dataset_id='3cc7a461-dd86-4382-bfa8-f395e562007d')
-    # client.datasets.datasets_from_get_datasets_response()
+    dataset = Dataset(name=body.datasetName, tables=tables)
+
     # post your dataset!
-    # client.datasets.post_dataset(dataset, group_id=workspaceId)
-    # abc = client.datasets.post_rows(dataset_id='3cc7a461-dd86-4382-bfa8-f395e562007d', table_name='contacts', rows=rows)
-    # print(dataset.name)
-
-    return abc
+    client.datasets.post_dataset(dataset, group_id=workspaceId)
 
 
-@app.get("/powerbi/duplicate")
-async def query_dax(datasetId: str):
-    authority_url = 'https://login.windows.net/common'
-    resource_url = 'https://analysis.windows.net/powerbi/api'
-    api_url = 'https://api.powerbi.com'
+    return "add success"
 
-    # change these to your credentials
-    client_id = 'ced5a0b0-3886-452b-9ca7-1fc9993a4ef5'
-    username = 'anhbt@vpi.pvn.vn'
-    password = 'Mac0901'
-
-    # Authenticate using adal
-    context = adal.AuthenticationContext(authority=authority_url,
-                                         validate_authority=True,
-                                         api_version=None)
-
-    # get your authentication token
-    token = context.acquire_token_with_username_password(resource=resource_url,
-                                                         client_id=client_id,
-                                                         username=username,
-                                                         password=password)
-
-    headers = {
-        'Authorization': f'Bearer {token.get("accessToken")}',
-        'Content-Type': 'application/json'
-    }
-
-    url = f"https://api.powerbi.com/v1.0/myorg/datasets/{datasetId}/clone"
-
-    response = requests.post(url, headers=headers)
-
-    if response.status_code == 200:
-        # Print the tables in the report
-        print(response.json())
-    else:
-        # Print the error message
-        print("Error: " + response.text)
-
-    return response.json()
