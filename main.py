@@ -1,7 +1,6 @@
 from fastapi import FastAPI
 import requests
 import adal
-import pandas as pd
 import json
 from pypowerbi.dataset import Column, Table, Dataset, Row
 from pypowerbi.client import PowerBIClient
